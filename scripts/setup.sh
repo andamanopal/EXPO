@@ -165,9 +165,25 @@ else
 fi
 export LD_LIBRARY_PATH="$MUJOCO_DIR/mujoco210/bin${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
-# System deps for mujoco_py compilation
-echo "       Installing mujoco_py build deps..."
-apt-get install -y -qq libosmesa6-dev libgl1-mesa-glx patchelf 2>/dev/null || true
+# System deps for mujoco_py compilation (GL/osmesa.h required)
+echo "       Installing mujoco_py build deps (apt-get update + install)..."
+apt-get update -qq
+apt-get install -y libosmesa6-dev libgl1-mesa-glx libglew-dev patchelf
+
+# Verify GL/osmesa.h exists — mujoco_py won't compile without it
+if [ ! -f /usr/include/GL/osmesa.h ]; then
+    echo "       WARNING: GL/osmesa.h not at /usr/include/GL/osmesa.h"
+    OSMESA_PATH=$(find / -name osmesa.h -type f 2>/dev/null | head -1)
+    if [ -n "$OSMESA_PATH" ]; then
+        OSMESA_DIR=$(dirname "$OSMESA_PATH")
+        echo "       Found osmesa.h at $OSMESA_PATH — adding $OSMESA_DIR to CPATH"
+        export CPATH="$OSMESA_DIR${CPATH:+:$CPATH}"
+    else
+        echo "       ERROR: osmesa.h not found anywhere. mujoco_py will fail to compile."
+        return 1 2>/dev/null || true
+    fi
+fi
+echo "       GL/osmesa.h: OK"
 
 "$PIP" install "Cython<3" "mujoco_py==2.1.2.14"
 
