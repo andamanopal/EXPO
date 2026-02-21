@@ -66,11 +66,20 @@ echo "       $($PYTHON --version)"
 "$PIP" install --upgrade pip setuptools wheel
 
 # ---------------------------------------------------------------------------
-# Step 4: Install JAX 0.4.x with CUDA (pinned to match EXPO environment.yml)
+# Step 4: Install JAX 0.4.x with CUDA (using system CUDA, not pip CUDA)
 # ---------------------------------------------------------------------------
-echo "[4/6] Installing JAX 0.4.x with CUDA 12..."
+echo "[4/6] Installing JAX 0.4.x with system CUDA 12..."
 
-"$PIP" install "jax[cuda12_pip]==0.4.35" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+# cuda12_local uses system CUDA; cuda12_pip installs nvidia-* pip packages
+# that have __file__=None on systems with pre-installed CUDA (RunPod, etc.)
+"$PIP" install "jax[cuda12_local]==0.4.35" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+
+# Clean up any pip-installed nvidia packages from previous runs
+"$PIP" uninstall -y \
+    nvidia-cuda-nvcc-cu12 nvidia-cublas-cu12 nvidia-cuda-cupti-cu12 \
+    nvidia-cuda-runtime-cu12 nvidia-cudnn-cu12 nvidia-cufft-cu12 \
+    nvidia-cusolver-cu12 nvidia-cusparse-cu12 nvidia-nccl-cu12 \
+    nvidia-nvjitlink-cu12 jax-cuda12-pjrt 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
 # Step 5: Install EXPO dependencies (versions from environment.yml)
