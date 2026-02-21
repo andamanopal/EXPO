@@ -22,9 +22,15 @@ cd "$WORKDIR"
 
 PYTHON="$WORKDIR/.venv/bin/python"
 if [ ! -f "$PYTHON" ]; then
-    echo "ERROR: .venv not found. Run 'bash scripts/setup.sh' first."
+    echo "ERROR: .venv not found. Run '. scripts/setup.sh' first."
     exit 1
 fi
+
+# System CUDA paths (same as setup.sh — needed if run in a fresh shell)
+export CUDA_ROOT="${CUDA_ROOT:-/usr/local/cuda}"
+export PATH="$CUDA_ROOT/bin${PATH:+:$PATH}"
+export LD_LIBRARY_PATH="$CUDA_ROOT/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export XLA_FLAGS="${XLA_FLAGS:---xla_gpu_cuda_data_dir=$CUDA_ROOT}"
 
 PROJECT="expo-adaptive-beta"
 SEED=42

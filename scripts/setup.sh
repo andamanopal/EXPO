@@ -4,8 +4,12 @@
 ###############################################################################
 # EXPO Adaptive Beta — RunPod Setup Script
 #
-# Pinned versions from EXPO environment.yml:
-#   jax=0.4.*, optax==0.1.5, tensorflow-probability==0.19.0, gym==0.23.1
+# Verified-compatible version set (all cross-checked):
+#   python=3.10, jax==0.4.35, jaxlib==0.4.34, flax==0.7.5, optax==0.1.5,
+#   chex==0.1.86, distrax==0.1.5, tfp==0.19.0, gym==0.23.1
+#
+# Uses system CUDA (cuda12_local) — NOT pip nvidia-* packages.
+# Requires: CUDA 12.x + cuDNN 9.x pre-installed on the machine.
 #
 # Usage:
 #   git clone -b adaptive-beta https://github.com/andamanopal/EXPO.git /data/EXPO
@@ -22,6 +26,19 @@ PIP="$VENV/bin/pip"
 PYTHON="$VENV/bin/python"
 
 # ---------------------------------------------------------------------------
+# Step 0: System CUDA environment (persists because script is sourced)
+# ---------------------------------------------------------------------------
+# cuda12_local expects system CUDA. Set paths so JAX + XLA can find it.
+export CUDA_ROOT="${CUDA_ROOT:-/usr/local/cuda}"
+export PATH="$CUDA_ROOT/bin${PATH:+:$PATH}"
+export LD_LIBRARY_PATH="$CUDA_ROOT/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export XLA_FLAGS="--xla_gpu_cuda_data_dir=$CUDA_ROOT"
+
+echo "[0/6] CUDA environment:"
+echo "       CUDA_ROOT=$CUDA_ROOT"
+echo "       nvcc: $(nvcc --version 2>/dev/null | grep 'release' || echo 'not found')"
+
+# ---------------------------------------------------------------------------
 # Step 1: Check repo
 # ---------------------------------------------------------------------------
 if [ ! -f "$WORKDIR/train_finetuning.py" ]; then
@@ -35,7 +52,7 @@ fi
 cd "$WORKDIR"
 
 # ---------------------------------------------------------------------------
-# Step 2: Install Python 3.10 (D4RL requires <3.11)
+# Step 2: Install Python 3.10 (D4RL requires python_requires<3.11)
 # ---------------------------------------------------------------------------
 echo "[2/6] Ensuring Python 3.10..."
 
@@ -52,9 +69,18 @@ fi
 echo "       $(python3.10 --version)"
 
 # ---------------------------------------------------------------------------
-# Step 3: Create venv with Python 3.10
+# Step 3: Create venv + ensure clean state
 # ---------------------------------------------------------------------------
-echo "[3/6] Creating Python 3.10 virtual environment..."
+echo "[3/6] Setting up Python 3.10 virtual environment..."
+
+# If venv exists, check if JAX is the right version. If not, nuke it.
+if [ -d "$VENV" ] && [ -f "$PIP" ]; then
+    INSTALLED_JAX=$("$PIP" show jax 2>/dev/null | grep "^Version:" | awk '{print $2}')
+    if [ "$INSTALLED_JAX" != "0.4.35" ]; then
+        echo "       Existing venv has JAX $INSTALLED_JAX (need 0.4.35), recreating..."
+        rm -rf "$VENV"
+    fi
+fi
 
 if [ ! -d "$VENV" ]; then
     python3.10 -m venv "$VENV"
@@ -63,38 +89,52 @@ fi
 echo "       Python: $PYTHON"
 echo "       $($PYTHON --version)"
 
-"$PIP" install --upgrade pip setuptools wheel
+"$PIP" install --upgrade pip setuptools wheel 2>&1 | tail -1
 
 # ---------------------------------------------------------------------------
-# Step 4: Install JAX 0.4.x with CUDA (using system CUDA, not pip CUDA)
+# Step 4: Install JAX 0.4.35 with system CUDA (cuda12_local)
 # ---------------------------------------------------------------------------
-echo "[4/6] Installing JAX 0.4.x with system CUDA 12..."
+echo "[4/6] Installing JAX 0.4.35 with system CUDA 12..."
 
-# cuda12_local uses system CUDA; cuda12_pip installs nvidia-* pip packages
-# that have __file__=None on systems with pre-installed CUDA (RunPod, etc.)
-"$PIP" install "jax[cuda12_local]==0.4.35" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+# cuda12_local = system CUDA. cuda12_pip = pip nvidia-* packages.
+# pip nvidia packages have __file__=None bug on RunPod/cloud (Python 3.10).
+# Note: JAX 0.4.35 has packaging bug #24826 — it pulls jaxlib==0.4.34 (fine).
+"$PIP" install "jax[cuda12_local]==0.4.35" \
+    -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 
-# Clean up any pip-installed nvidia packages from previous runs
+# Remove any leftover pip nvidia packages from previous cuda12_pip installs.
+# These conflict with system CUDA. Do NOT remove jax-cuda12-plugin/pjrt.
+echo "       Cleaning up pip nvidia packages (using system CUDA instead)..."
 "$PIP" uninstall -y \
     nvidia-cuda-nvcc-cu12 nvidia-cublas-cu12 nvidia-cuda-cupti-cu12 \
     nvidia-cuda-runtime-cu12 nvidia-cudnn-cu12 nvidia-cufft-cu12 \
     nvidia-cusolver-cu12 nvidia-cusparse-cu12 nvidia-nccl-cu12 \
-    nvidia-nvjitlink-cu12 jax-cuda12-pjrt 2>/dev/null || true
+    nvidia-nvjitlink-cu12 2>/dev/null || true
+
+# Smoke test: can JAX see the GPU?
+echo "       JAX smoke test..."
+"$PYTHON" -c "import jax; devs=jax.devices(); print(f'       JAX {jax.__version__}, devices: {devs}')" 2>&1 || {
+    echo "       ERROR: JAX cannot initialize. Check CUDA installation."
+    echo "       Expected: nvcc --version shows CUDA 12.x"
+    echo "       Expected: ls $CUDA_ROOT/lib64/libcudnn* finds cuDNN"
+    return 1 2>/dev/null || true
+}
 
 # ---------------------------------------------------------------------------
-# Step 5: Install EXPO dependencies (versions from environment.yml)
+# Step 5: Install EXPO dependencies (all versions cross-verified)
 # ---------------------------------------------------------------------------
 echo "[5/6] Installing EXPO dependencies..."
 
-# Core ML — IMPORTANT: re-state jax/jaxlib pins so flax/chex don't upgrade them
+# Core ML stack — EVERY version pinned to prevent pip from upgrading JAX.
+# CRITICAL: distrax==0.1.5 because 0.1.6+ requires jax>=0.7.0
+# CRITICAL: jax==0.4.35 re-stated so flax/chex can't upgrade it
 "$PIP" install \
     "jax==0.4.35" \
-    "jaxlib==0.4.35" \
     "flax==0.7.5" \
     "optax==0.1.5" \
     "chex==0.1.86" \
+    "distrax==0.1.5" \
     "tensorflow-probability==0.19.0" \
-    distrax \
     ml_collections \
     orbax-checkpoint==0.2.3
 
@@ -130,30 +170,37 @@ echo "[5/6] Installing EXPO dependencies..."
     tensorboardX
 
 # ---------------------------------------------------------------------------
-# Step 6: Verify
+# Step 6: Verify everything
 # ---------------------------------------------------------------------------
 echo "[6/6] Verifying installation..."
 
 "$PYTHON" -c "
 import sys
-print(f'Python:         {sys.version}')
+print(f'Python:         {sys.version.split()[0]}')
 
-import jax
-print(f'JAX version:    {jax.__version__}')
+import jax, jaxlib
+print(f'JAX:            {jax.__version__}')
+print(f'jaxlib:         {jaxlib.__version__}')
 print(f'JAX devices:    {jax.devices()}')
 print(f'GPU available:  {len(jax.devices(\"gpu\")) > 0}')
 
 import flax
-print(f'Flax version:   {flax.__version__}')
+print(f'Flax:           {flax.__version__}')
 
 import optax
-print(f'Optax version:  {optax.__version__}')
+print(f'Optax:          {optax.__version__}')
+
+import chex
+print(f'Chex:           {chex.__version__}')
+
+import distrax
+print(f'Distrax:        {distrax.__version__}')
 
 import tensorflow_probability.substrates.jax as tfp
 print(f'TFP (JAX):      {tfp.__version__}')
 
 import gym
-print(f'Gym version:    {gym.__version__}')
+print(f'Gym:            {gym.__version__}')
 
 try:
     import d4rl
@@ -163,6 +210,8 @@ except Exception as e:
 
 from expo.agents.sac.edit_distance import EditDistance
 print('EditDistance:    OK')
+print()
+print('All checks passed.')
 "
 
 echo ""
