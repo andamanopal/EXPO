@@ -15,6 +15,7 @@ from flax.training.train_state import TrainState
 import numpy as np
 
 from expo.agents.agent import Agent
+from expo.agents.sac.edit_distance import EditDistance
 from expo.agents.sac.temperature import Temperature
 from expo.data.dataset import DatasetDict
 from expo.distributions import TanhNormal
@@ -55,6 +56,7 @@ class EXPOLearner(Agent):
     target_actor: TrainState
     edit_actor: TrainState
     temp: TrainState
+    beta_state: TrainState
     betas: jnp.ndarray
     alphas: jnp.ndarray
     alpha_hats: jnp.ndarray
@@ -64,6 +66,8 @@ class EXPOLearner(Agent):
     N: int = struct.field(pytree_node=False)
     n_edit_samples: int = struct.field(pytree_node=False)
     edit_action_scale: float = struct.field(pytree_node=False)
+    adaptive_beta: bool = struct.field(pytree_node=False)
+    target_edit_mag: float = struct.field(pytree_node=False)
     batch_split: int = struct.field(pytree_node=False)
     M: int = struct.field(pytree_node=False)
     ddpm_temperature: float
@@ -119,6 +123,9 @@ class EXPOLearner(Agent):
         actor_num_blocks: int = 3,
         ddpm_temperature: float = 1.0,
         beta_schedule: str = 'vp',
+        adaptive_beta: bool = False,
+        beta_lr: float = 3e-4,
+        target_edit_mag: float = 0.5,
     ):
 
         action_dim = action_space.shape[-1]
@@ -139,7 +146,7 @@ class EXPOLearner(Agent):
 
 
         rng = jax.random.PRNGKey(seed)
-        rng, actor_key, critic_key, temp_key = jax.random.split(rng, 4)
+        rng, actor_key, critic_key, temp_key, beta_key = jax.random.split(rng, 5)
 
         preprocess_time_cls = partial(FourierFeatures,
                                       output_size=time_dim,
@@ -248,29 +255,49 @@ class EXPOLearner(Agent):
             tx=optax.adam(learning_rate=temp_lr),
         )
 
+        beta_def = EditDistance(
+            initial_beta=edit_action_scale,
+            min_beta=0.01,
+            max_beta=1.0,
+        )
+        beta_params = beta_def.init(beta_key)["params"]
+        beta_tx = (
+            optax.adam(learning_rate=beta_lr)
+            if adaptive_beta
+            else optax.GradientTransformation(lambda _: None, lambda _: None)
+        )
+        beta_state = TrainState.create(
+            apply_fn=beta_def.apply,
+            params=beta_params,
+            tx=beta_tx,
+        )
+
         return cls(
             rng=rng,
             actor=actor,
-            target_actor=target_actor, 
+            target_actor=target_actor,
             edit_actor=edit_actor,
             betas=betas,
-            alphas=alphas, 
+            alphas=alphas,
             alpha_hats=alpha_hat,
-            action_dim=action_dim, 
-            clip_sampler=clip_sampler, 
-            T=T, 
-            N=N, 
-            n_edit_samples=n_edit_samples, 
-            edit_action_scale=edit_action_scale, 
-            batch_split=batch_split, 
-            M=M, 
-            actor_tau=actor_tau, 
-            ddpm_temperature=ddpm_temperature, 
+            action_dim=action_dim,
+            clip_sampler=clip_sampler,
+            T=T,
+            N=N,
+            n_edit_samples=n_edit_samples,
+            edit_action_scale=edit_action_scale,
+            adaptive_beta=adaptive_beta,
+            target_edit_mag=target_edit_mag,
+            batch_split=batch_split,
+            M=M,
+            actor_tau=actor_tau,
+            ddpm_temperature=ddpm_temperature,
             critic=critic,
             target_critic=target_critic,
             temp=temp,
+            beta_state=beta_state,
             target_entropy=target_entropy,
-            entropy_scale=entropy_scale, 
+            entropy_scale=entropy_scale,
             tau=tau,
             discount=discount,
             num_qs=num_qs,
@@ -278,6 +305,13 @@ class EXPOLearner(Agent):
             backup_entropy=backup_entropy,
         )
     
+
+    def get_beta(self):
+        if self.adaptive_beta:
+            return self.beta_state.apply_fn(
+                {"params": self.beta_state.params}
+            )
+        return self.edit_action_scale
 
     def eval_actions(self, observations):
         rng = self.rng
@@ -306,15 +340,15 @@ class EXPOLearner(Agent):
                 d_actions = diffusion_actions.copy()[:self.n_edit_samples]
                 r_observations = jnp.concatenate([r_observations, d_actions], axis=1)
                 r_samples, rng =  _sample_actions(key, self.edit_actor.apply_fn, self.edit_actor.params, r_observations)
-                r_samples = r_samples * self.edit_action_scale + d_actions
+                r_samples = r_samples * self.get_beta() + d_actions
                 actions = jnp.concatenate([actions, r_samples], axis=0)
-                
+
             qs = compute_q(self.target_critic.apply_fn, target_params, observations, actions)
             idx = jnp.argmax(qs)
             action = actions[idx]
 
         else:
-        
+
             action = actions[0]
 
         rng, _ = jax.random.split(rng, 2)
@@ -346,7 +380,7 @@ class EXPOLearner(Agent):
             d_actions = actions.copy()[:, :self.n_edit_samples].reshape(-1, actions.shape[-1])
             r_observations = jnp.concatenate([r_observations, d_actions], axis=1) # self.n_edit_samples actions for each observation
             r_samples, rng =  _sample_actions(key, self.edit_actor.apply_fn, self.edit_actor.params, r_observations)
-            r_samples = r_samples * self.edit_action_scale + d_actions
+            r_samples = r_samples * self.get_beta() + d_actions
             actions = jnp.concatenate([actions, r_samples.reshape(batch_size, self.n_edit_samples, -1)], axis=1)
             actions_flat = actions.reshape(-1, actions.shape[-1])
 
@@ -404,9 +438,8 @@ class EXPOLearner(Agent):
                 d_actions = diffusion_actions.copy()[:self.n_edit_samples]
                 r_observations = jnp.concatenate([r_observations, d_actions], axis=1)
                 r_samples, rng =  _sample_actions(key, self.edit_actor.apply_fn, self.edit_actor.params, r_observations)
-                r_samples = r_samples * self.edit_action_scale + d_actions
+                r_samples = r_samples * self.get_beta() + d_actions
                 actions = jnp.concatenate([actions, r_samples], axis=0)
-
 
             qs = compute_q(self.target_critic.apply_fn, target_params, observations, actions)
             idx = jnp.argmax(qs)
@@ -432,12 +465,13 @@ class EXPOLearner(Agent):
             actions = dist.sample(seed=key)
 
             log_probs = dist.log_prob(actions)
-            actions = actions * self.edit_action_scale
-            log_probs -= actions.shape[-1] * jnp.log(self.edit_action_scale)
+            raw_edit_mag = jnp.abs(actions).mean()
+            beta = self.get_beta()
+            actions = actions * beta
+            log_probs -= actions.shape[-1] * jnp.log(beta)
 
-            actions += batch["actions"]
+            actions = actions + batch["actions"]
 
-        
             qs = self.critic.apply_fn(
                 {"params": self.critic.params},
                 batch["observations"],
@@ -449,7 +483,13 @@ class EXPOLearner(Agent):
             edit_actor_loss = (
                 self.entropy_scale * log_probs * self.temp.apply_fn({"params": self.temp.params}) - q
             ).mean()
-            return edit_actor_loss, {"edit_q": q.mean(), "edit_actor_loss": edit_actor_loss, "entropy": -log_probs.mean()}
+            return edit_actor_loss, {
+                "edit_q": q.mean(),
+                "edit_actor_loss": edit_actor_loss,
+                "entropy": -log_probs.mean(),
+                "raw_edit_mag": raw_edit_mag,
+                "beta": beta,
+            }
 
         grads, actor_info = jax.grad(edit_actor_loss_fn, has_aux=True)(self.edit_actor.params)
         edit_actor = self.edit_actor.apply_gradients(grads=grads)
@@ -507,6 +547,18 @@ class EXPOLearner(Agent):
         temp = self.temp.apply_gradients(grads=grads)
 
         return self.replace(temp=temp), temp_info
+
+    def update_beta(self, raw_edit_mag: float) -> Tuple[Agent, Dict[str, float]]:
+        def beta_loss_fn(beta_params):
+            beta = self.beta_state.apply_fn({"params": beta_params})
+            loss = beta * (raw_edit_mag - self.target_edit_mag)
+            return loss, {"beta": beta, "beta_loss": loss}
+
+        grads, beta_info = jax.grad(beta_loss_fn, has_aux=True)(
+            self.beta_state.params
+        )
+        new_beta_state = self.beta_state.apply_gradients(grads=grads)
+        return self.replace(beta_state=new_beta_state), beta_info
 
     def update_critic(self, batch: DatasetDict) -> Tuple[TrainState, Dict[str, float]]:
 
@@ -578,8 +630,11 @@ class EXPOLearner(Agent):
             if self.n_edit_samples > 0:
                 new_agent, actor_info = new_agent.update_edit_actor(mini_batch)
                 new_agent, temp_info = new_agent.update_temperature(actor_info["entropy"])
-
                 actor_info.update(temp_info)
+
+                if self.adaptive_beta:
+                    new_agent, beta_info = new_agent.update_beta(actor_info["raw_edit_mag"])
+                    actor_info.update(beta_info)
 
         return new_agent, {**actor_info, **critic_info}
     
@@ -604,7 +659,10 @@ class EXPOLearner(Agent):
         if self.n_edit_samples > 0:
             new_agent, actor_info = new_agent.update_edit_actor(mini_batch)
             new_agent, temp_info = new_agent.update_temperature(actor_info["entropy"])
-
             actor_info.update(temp_info)
+
+            if self.adaptive_beta:
+                new_agent, beta_info = new_agent.update_beta(actor_info["raw_edit_mag"])
+                actor_info.update(beta_info)
 
         return new_agent, {**actor_info, **critic_info}

@@ -22,4 +22,8 @@ def get_config():
     config.batch_split = 1
     config.T = 10
 
+    config.adaptive_beta = False
+    config.beta_lr = 3e-4
+    config.target_edit_mag = 0.5
+
     return config
