@@ -73,12 +73,15 @@ echo "       $(python3.10 --version)"
 # ---------------------------------------------------------------------------
 echo "[3/6] Setting up Python 3.10 virtual environment..."
 
-# If venv exists, check if JAX is the right version. If not, nuke it.
+# If venv exists, check critical package versions. Nuke if any are wrong.
 if [ -d "$VENV" ] && [ -f "$PIP" ]; then
     INSTALLED_JAX=$("$PIP" show jax 2>/dev/null | grep "^Version:" | awk '{print $2}')
-    if [ "$INSTALLED_JAX" != "0.4.35" ]; then
-        echo "       Existing venv has JAX $INSTALLED_JAX (need 0.4.35), recreating..."
+    INSTALLED_FLAX=$("$PIP" show flax 2>/dev/null | grep "^Version:" | awk '{print $2}')
+    if [ "$INSTALLED_JAX" != "0.4.35" ] || [ "$INSTALLED_FLAX" != "0.8.5" ]; then
+        echo "       Stale venv (JAX=$INSTALLED_JAX, flax=$INSTALLED_FLAX), recreating..."
         rm -rf "$VENV"
+    else
+        echo "       Existing venv OK (JAX=$INSTALLED_JAX, flax=$INSTALLED_FLAX)"
     fi
 fi
 
