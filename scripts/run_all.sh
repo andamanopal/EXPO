@@ -2,9 +2,9 @@
 set -e
 
 ###############################################################################
-# EXPO Adaptive Beta — Run All Experiments
+# EXPO Adaptive Beta — Run All Experiments (Sequential)
 #
-# Launches 4 experiments in parallel on a single GPU:
+# Runs 4 experiments one at a time for easy debugging:
 #   1. Baseline antmaze (fixed beta=0.05)
 #   2. Baseline pen     (fixed beta=0.70)
 #   3. Adaptive antmaze (init=0.3, should converge toward ~0.05)
@@ -13,8 +13,6 @@ set -e
 # Usage:
 #   bash scripts/run_all.sh              # Full 300K/1M steps
 #   bash scripts/run_all.sh --quick      # Quick 10K validation run
-#
-# Each run uses ~3GB VRAM. All 4 fit on one RTX 4090 (24GB).
 ###############################################################################
 
 WORKDIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -31,11 +29,11 @@ export CUDA_ROOT="${CUDA_ROOT:-/usr/local/cuda}"
 export PATH="$CUDA_ROOT/bin${PATH:+:$PATH}"
 export LD_LIBRARY_PATH="$CUDA_ROOT/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export XLA_FLAGS="${XLA_FLAGS:---xla_gpu_cuda_data_dir=$CUDA_ROOT}"
+export XLA_PYTHON_CLIENT_PREALLOCATE=false
+export D4RL_SUPPRESS_IMPORT_ERROR=1
 
 PROJECT="expo-adaptive-beta"
 SEED=42
-LOG_DIR="$WORKDIR/logs"
-mkdir -p "$LOG_DIR"
 
 # Quick mode: short runs to validate code works
 if [ "$1" = "--quick" ]; then
@@ -64,29 +62,28 @@ COMMON_FLAGS="--config=configs/expo_config.py \
 
 echo ""
 echo "Wandb project: $PROJECT"
-echo "Logs: $LOG_DIR/"
 echo ""
 
 # ---------------------------------------------------------------------------
 # Experiment 1: Baseline antmaze — fixed optimal beta=0.05
 # ---------------------------------------------------------------------------
-echo "[1/4] Launching: baseline antmaze (fixed beta=0.05)..."
-XLA_PYTHON_CLIENT_PREALLOCATE=false \
+echo "============================================"
+echo "[1/4] baseline antmaze (fixed beta=0.05)"
+echo "============================================"
 "$PYTHON" train_finetuning.py \
     --env_name=antmaze-large-diverse-v2 \
     --seed=$SEED \
     --max_steps=$ANTMAZE_STEPS \
     --start_training=5000 \
     --config.edit_action_scale=0.05 \
-    $COMMON_FLAGS \
-    > "$LOG_DIR/baseline_antmaze.log" 2>&1 &
-PID1=$!
+    $COMMON_FLAGS
 
 # ---------------------------------------------------------------------------
 # Experiment 2: Baseline pen — fixed optimal beta=0.70
 # ---------------------------------------------------------------------------
-echo "[2/4] Launching: baseline pen (fixed beta=0.70)..."
-XLA_PYTHON_CLIENT_PREALLOCATE=false \
+echo "============================================"
+echo "[2/4] baseline pen (fixed beta=0.70)"
+echo "============================================"
 "$PYTHON" train_finetuning.py \
     --env_name=pen-binary-v0 \
     --seed=$SEED \
@@ -94,15 +91,14 @@ XLA_PYTHON_CLIENT_PREALLOCATE=false \
     --start_training=0 \
     --config.edit_action_scale=0.7 \
     --config.actor_drop=0.1 \
-    $COMMON_FLAGS \
-    > "$LOG_DIR/baseline_pen.log" 2>&1 &
-PID2=$!
+    $COMMON_FLAGS
 
 # ---------------------------------------------------------------------------
 # Experiment 3: Adaptive antmaze — wrong init beta=0.3
 # ---------------------------------------------------------------------------
-echo "[3/4] Launching: adaptive antmaze (init=0.3)..."
-XLA_PYTHON_CLIENT_PREALLOCATE=false \
+echo "============================================"
+echo "[3/4] adaptive antmaze (init=0.3)"
+echo "============================================"
 "$PYTHON" train_finetuning.py \
     --env_name=antmaze-large-diverse-v2 \
     --seed=$SEED \
@@ -110,15 +106,14 @@ XLA_PYTHON_CLIENT_PREALLOCATE=false \
     --start_training=5000 \
     --config.edit_action_scale=0.3 \
     --config.adaptive_beta=True \
-    $COMMON_FLAGS \
-    > "$LOG_DIR/adaptive_antmaze.log" 2>&1 &
-PID3=$!
+    $COMMON_FLAGS
 
 # ---------------------------------------------------------------------------
 # Experiment 4: Adaptive pen — wrong init beta=0.3
 # ---------------------------------------------------------------------------
-echo "[4/4] Launching: adaptive pen (init=0.3)..."
-XLA_PYTHON_CLIENT_PREALLOCATE=false \
+echo "============================================"
+echo "[4/4] adaptive pen (init=0.3)"
+echo "============================================"
 "$PYTHON" train_finetuning.py \
     --env_name=pen-binary-v0 \
     --seed=$SEED \
@@ -127,37 +122,12 @@ XLA_PYTHON_CLIENT_PREALLOCATE=false \
     --config.edit_action_scale=0.3 \
     --config.adaptive_beta=True \
     --config.actor_drop=0.1 \
-    $COMMON_FLAGS \
-    > "$LOG_DIR/adaptive_pen.log" 2>&1 &
-PID4=$!
+    $COMMON_FLAGS
 
 echo ""
 echo "============================================"
-echo "  All 4 experiments launched!"
+echo "  All 4 experiments completed!"
 echo ""
-echo "  PIDs: $PID1 $PID2 $PID3 $PID4"
-echo ""
-echo "  Monitor:"
-echo "    tail -f $LOG_DIR/adaptive_antmaze.log"
-echo "    tail -f $LOG_DIR/adaptive_pen.log"
-echo "    watch nvidia-smi"
-echo "    wandb dashboard: https://wandb.ai"
-echo ""
-echo "  Wait for all to finish:"
-echo "    wait $PID1 $PID2 $PID3 $PID4"
+echo "  Generate plots:"
+echo "    $PYTHON scripts/plot_results.py --wandb_project $PROJECT --output_dir plots/results"
 echo "============================================"
-
-# Wait for all experiments
-wait $PID1 $PID2 $PID3 $PID4
-EXIT_CODE=$?
-
-echo ""
-if [ $EXIT_CODE -eq 0 ]; then
-    echo "All experiments completed successfully."
-    echo ""
-    echo "Generate plots:"
-    echo "  $PYTHON scripts/plot_results.py --wandb_project $PROJECT --output_dir plots/results"
-else
-    echo "Some experiments failed. Check logs:"
-    echo "  ls -la $LOG_DIR/*.log"
-fi
