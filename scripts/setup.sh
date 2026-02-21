@@ -5,8 +5,8 @@
 # EXPO Adaptive Beta — RunPod Setup Script
 #
 # Verified-compatible version set (all cross-checked):
-#   python=3.10, jax==0.4.35, jaxlib==0.4.34, flax==0.7.5, optax==0.1.5,
-#   chex==0.1.86, distrax==0.1.5, tfp==0.19.0, gym==0.23.1
+#   python=3.10, numpy>=1.24<2.0, jax==0.4.35, jaxlib==0.4.34, flax==0.8.5,
+#   optax==0.1.5, chex==0.1.86, distrax==0.1.5, tfp==0.19.0, gym==0.23.1
 #
 # Uses system CUDA (cuda12_local) — NOT pip nvidia-* packages.
 # Requires: CUDA 12.x + cuDNN 9.x pre-installed on the machine.
@@ -161,11 +161,14 @@ print(f'       cuDNN test: {y.shape} on {y.devices()} — OK')
 echo "[5/6] Installing EXPO dependencies..."
 
 # Core ML stack — EVERY version pinned to prevent pip from upgrading JAX.
+# CRITICAL: numpy<2.0 because tensorflow-probability 0.19.0 uses np.issctype
+#           (removed in NumPy 2.0). numpy>=1.24 satisfies JAX's requirement.
 # CRITICAL: flax>=0.8.0 needed (0.7.5 uses define_bool_state removed in JAX 0.4.25+)
 #           flax<=0.10.4 needed (0.10.5+ requires jax>=0.5.1)
 # CRITICAL: distrax==0.1.5 because 0.1.6+ requires jax>=0.7.0
 # CRITICAL: jax==0.4.35 re-stated so flax/chex can't upgrade it
 "$PIP" install \
+    "numpy>=1.24,<2.0" \
     "jax==0.4.35" \
     "flax==0.8.5" \
     "optax==0.1.5" \
@@ -256,6 +259,9 @@ echo "[6/6] Verifying installation..."
 "$PYTHON" -c "
 import sys
 print(f'Python:         {sys.version.split()[0]}')
+
+import numpy as np
+print(f'NumPy:          {np.__version__}')
 
 import jax, jaxlib
 print(f'JAX:            {jax.__version__}')
