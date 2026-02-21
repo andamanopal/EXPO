@@ -20,9 +20,10 @@ set -e
 WORKDIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$WORKDIR"
 
-# Activate venv if present
-if [ -f "venv/bin/activate" ]; then
-    source venv/bin/activate
+PYTHON="$WORKDIR/.venv/bin/python"
+if [ ! -f "$PYTHON" ]; then
+    echo "ERROR: .venv not found. Run 'bash scripts/setup.sh' first."
+    exit 1
 fi
 
 PROJECT="expo-adaptive-beta"
@@ -65,7 +66,7 @@ echo ""
 # ---------------------------------------------------------------------------
 echo "[1/4] Launching: baseline antmaze (fixed beta=0.05)..."
 XLA_PYTHON_CLIENT_PREALLOCATE=false \
-python train_finetuning.py \
+"$PYTHON" train_finetuning.py \
     --env_name=antmaze-large-diverse-v2 \
     --seed=$SEED \
     --max_steps=$ANTMAZE_STEPS \
@@ -80,7 +81,7 @@ PID1=$!
 # ---------------------------------------------------------------------------
 echo "[2/4] Launching: baseline pen (fixed beta=0.70)..."
 XLA_PYTHON_CLIENT_PREALLOCATE=false \
-python train_finetuning.py \
+"$PYTHON" train_finetuning.py \
     --env_name=pen-binary-v0 \
     --seed=$SEED \
     --max_steps=$PEN_STEPS \
@@ -96,7 +97,7 @@ PID2=$!
 # ---------------------------------------------------------------------------
 echo "[3/4] Launching: adaptive antmaze (init=0.3)..."
 XLA_PYTHON_CLIENT_PREALLOCATE=false \
-python train_finetuning.py \
+"$PYTHON" train_finetuning.py \
     --env_name=antmaze-large-diverse-v2 \
     --seed=$SEED \
     --max_steps=$ANTMAZE_STEPS \
@@ -112,7 +113,7 @@ PID3=$!
 # ---------------------------------------------------------------------------
 echo "[4/4] Launching: adaptive pen (init=0.3)..."
 XLA_PYTHON_CLIENT_PREALLOCATE=false \
-python train_finetuning.py \
+"$PYTHON" train_finetuning.py \
     --env_name=pen-binary-v0 \
     --seed=$SEED \
     --max_steps=$PEN_STEPS \
@@ -149,7 +150,7 @@ if [ $EXIT_CODE -eq 0 ]; then
     echo "All experiments completed successfully."
     echo ""
     echo "Generate plots:"
-    echo "  python scripts/plot_results.py --wandb_project $PROJECT --output_dir plots/results"
+    echo "  $PYTHON scripts/plot_results.py --wandb_project $PROJECT --output_dir plots/results"
 else
     echo "Some experiments failed. Check logs:"
     echo "  ls -la $LOG_DIR/*.log"
