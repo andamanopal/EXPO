@@ -168,7 +168,14 @@ export LD_LIBRARY_PATH="$MUJOCO_DIR/mujoco210/bin${LD_LIBRARY_PATH:+:$LD_LIBRARY
 # System deps for mujoco_py compilation (GL/osmesa.h required)
 echo "       Installing mujoco_py build deps (apt-get update + install)..."
 apt-get update -qq
-apt-get install -y libosmesa6-dev libgl1-mesa-glx libglew-dev patchelf
+# Install each package separately — libgl1-mesa-glx is obsolete on newer Ubuntu
+# and would cause the entire apt-get to fail if bundled together.
+apt-get install -y libosmesa6-dev || echo "       WARN: libosmesa6-dev failed"
+apt-get install -y libglew-dev    || echo "       WARN: libglew-dev failed"
+apt-get install -y patchelf       || echo "       WARN: patchelf failed"
+apt-get install -y libgl1-mesa-dri 2>/dev/null || \
+    apt-get install -y libgl1-mesa-glx 2>/dev/null || \
+    echo "       WARN: mesa GL runtime not found (may already be installed)"
 
 # Verify GL/osmesa.h exists — mujoco_py won't compile without it
 if [ ! -f /usr/include/GL/osmesa.h ]; then
