@@ -108,21 +108,21 @@ echo "[4/6] Installing JAX 0.4.35 with system CUDA 12..."
 "$PIP" install "jax[cuda12_local]==0.4.35" \
     -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 
-# Remove only nvidia-cuda-nvcc-cu12 (known __file__=None bug on cloud images).
-# KEEP runtime libs (cudnn, cublas, etc.) — many cloud images lack system cuDNN.
-echo "       Cleaning up nvidia-cuda-nvcc-cu12 (known broken on cloud images)..."
-"$PIP" uninstall -y nvidia-cuda-nvcc-cu12 2>/dev/null || true
-
-# Ensure cuDNN is available (needed for neural network ops, not just device detection)
-if ldconfig -p 2>/dev/null | grep -q libcudnn; then
-    echo "       System cuDNN found."
-else
-    echo "       System cuDNN NOT found. Ensuring pip nvidia-cudnn-cu12 is installed..."
-    "$PIP" install nvidia-cudnn-cu12 2>/dev/null || true
-    # Also ensure cublas/cusolver/other runtime libs are present
-    "$PIP" install nvidia-cublas-cu12 nvidia-cusolver-cu12 nvidia-cusparse-cu12 \
-        nvidia-cufft-cu12 nvidia-cuda-runtime-cu12 nvidia-nvjitlink-cu12 2>/dev/null || true
-fi
+# Ensure ALL pip nvidia CUDA packages are installed (cuDNN, ptxas, cublas, etc.)
+# Original EXPO uses conda which bundles these automatically. With pip, we need them
+# as separate packages since this cloud image lacks a full system CUDA toolkit.
+echo "       Ensuring pip nvidia CUDA packages are installed..."
+"$PIP" install \
+    nvidia-cuda-nvcc-cu12 \
+    nvidia-cudnn-cu12 \
+    nvidia-cublas-cu12 \
+    nvidia-cusolver-cu12 \
+    nvidia-cusparse-cu12 \
+    nvidia-cufft-cu12 \
+    nvidia-cuda-runtime-cu12 \
+    nvidia-cuda-cupti-cu12 \
+    nvidia-nvjitlink-cu12 \
+    nvidia-nccl-cu12 2>/dev/null || true
 
 # Add pip nvidia lib dirs to LD_LIBRARY_PATH (covers both system and pip cuDNN)
 NVIDIA_LIBS=$("$PYTHON" -c "
