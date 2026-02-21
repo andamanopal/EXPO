@@ -4,11 +4,8 @@ import os
 import pickle
 
 import d4rl
-try:
-    import d4rl.gym_mujoco
-    import d4rl.locomotion
-except Exception:
-    pass  # Not needed for antmaze/pen; requires mujoco_py
+import d4rl.gym_mujoco
+import d4rl.locomotion
 import dmcgym
 import gym
 import numpy as np

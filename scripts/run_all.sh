@@ -29,6 +29,7 @@ export CUDA_ROOT="${CUDA_ROOT:-/usr/local/cuda}"
 export PATH="$CUDA_ROOT/bin${PATH:+:$PATH}"
 export LD_LIBRARY_PATH="$CUDA_ROOT/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export XLA_FLAGS="${XLA_FLAGS:---xla_gpu_cuda_data_dir=$CUDA_ROOT}"
+export LD_LIBRARY_PATH="$HOME/.mujoco/mujoco210/bin${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export XLA_PYTHON_CLIENT_PREALLOCATE=false
 export D4RL_SUPPRESS_IMPORT_ERROR=1
 

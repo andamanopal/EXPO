@@ -34,6 +34,9 @@ export PATH="$CUDA_ROOT/bin${PATH:+:$PATH}"
 export LD_LIBRARY_PATH="$CUDA_ROOT/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export XLA_FLAGS="--xla_gpu_cuda_data_dir=$CUDA_ROOT"
 
+# MuJoCo 210 path (needed by mujoco_py, used by D4RL)
+export LD_LIBRARY_PATH="$HOME/.mujoco/mujoco210/bin${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
 echo "[0/6] CUDA environment:"
 echo "       CUDA_ROOT=$CUDA_ROOT"
 echo "       nvcc: $(nvcc --version 2>/dev/null | grep 'release' || echo 'not found')"
@@ -149,14 +152,33 @@ echo "[5/6] Installing EXPO dependencies..."
     mujoco \
     dm_control
 
-# dmcgym: --no-deps to avoid gym[mujoco] pulling legacy mujoco_py
+# MuJoCo 210 + mujoco_py (needed by D4RL's antmaze and locomotion envs)
+MUJOCO_DIR="$HOME/.mujoco"
+if [ ! -d "$MUJOCO_DIR/mujoco210" ]; then
+    echo "       Downloading MuJoCo 210..."
+    mkdir -p "$MUJOCO_DIR"
+    wget -q https://github.com/google-deepmind/mujoco/releases/download/2.1.0/mujoco210-linux-x86_64.tar.gz -O /tmp/mujoco210.tar.gz
+    tar -xzf /tmp/mujoco210.tar.gz -C "$MUJOCO_DIR/"
+    rm /tmp/mujoco210.tar.gz
+else
+    echo "       MuJoCo 210 already at $MUJOCO_DIR/mujoco210"
+fi
+export LD_LIBRARY_PATH="$MUJOCO_DIR/mujoco210/bin${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
+# System deps for mujoco_py compilation
+echo "       Installing mujoco_py build deps..."
+apt-get install -y -qq libosmesa6-dev libgl1-mesa-glx patchelf 2>/dev/null || true
+
+"$PIP" install "Cython<3" "mujoco_py==2.1.2.14"
+
+# dmcgym: --no-deps to avoid gym[mujoco] pulling legacy mujoco_py again
 "$PIP" install --no-deps dmcgym@git+https://github.com/ikostrikov/dmcgym
 
-# D4RL: --no-deps to avoid pulling mujoco_py and pybullet
+# D4RL: --no-deps to avoid pulling pybullet (mujoco_py is now installed)
 "$PIP" install --no-deps \
     d4rl@git+https://github.com/Farama-Foundation/D4RL.git@2b96431a0e9fd90c8032624b0dc3cd4514d15632
 
-# D4RL's actual runtime deps (without mujoco_py)
+# D4RL's actual runtime deps (that --no-deps skipped)
 "$PIP" install h5py click termcolor
 
 # Logging and utils
