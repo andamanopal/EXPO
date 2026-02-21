@@ -71,12 +71,12 @@ echo "============================================"
 echo "[1/4] baseline antmaze (fixed beta=0.05)"
 echo "============================================"
 "$PYTHON" train_finetuning.py \
+    $COMMON_FLAGS \
     --env_name=antmaze-large-diverse-v2 \
     --seed=$SEED \
     --max_steps=$ANTMAZE_STEPS \
     --start_training=5000 \
-    --config.edit_action_scale=0.05 \
-    $COMMON_FLAGS
+    --config.edit_action_scale=0.05
 
 # ---------------------------------------------------------------------------
 # Experiment 2: Baseline pen — fixed optimal beta=0.70
@@ -85,13 +85,13 @@ echo "============================================"
 echo "[2/4] baseline pen (fixed beta=0.70)"
 echo "============================================"
 "$PYTHON" train_finetuning.py \
+    $COMMON_FLAGS \
     --env_name=pen-binary-v0 \
     --seed=$SEED \
     --max_steps=$PEN_STEPS \
     --start_training=0 \
     --config.edit_action_scale=0.7 \
-    --config.actor_drop=0.1 \
-    $COMMON_FLAGS
+    --config.actor_drop=0.1
 
 # ---------------------------------------------------------------------------
 # Experiment 3: Adaptive antmaze — wrong init beta=0.3
@@ -100,13 +100,13 @@ echo "============================================"
 echo "[3/4] adaptive antmaze (init=0.3)"
 echo "============================================"
 "$PYTHON" train_finetuning.py \
+    $COMMON_FLAGS \
     --env_name=antmaze-large-diverse-v2 \
     --seed=$SEED \
     --max_steps=$ANTMAZE_STEPS \
     --start_training=5000 \
     --config.edit_action_scale=0.3 \
-    --config.adaptive_beta=True \
-    $COMMON_FLAGS
+    --config.adaptive_beta=True
 
 # ---------------------------------------------------------------------------
 # Experiment 4: Adaptive pen — wrong init beta=0.3
@@ -115,14 +115,14 @@ echo "============================================"
 echo "[4/4] adaptive pen (init=0.3)"
 echo "============================================"
 "$PYTHON" train_finetuning.py \
+    $COMMON_FLAGS \
     --env_name=pen-binary-v0 \
     --seed=$SEED \
     --max_steps=$PEN_STEPS \
     --start_training=0 \
     --config.edit_action_scale=0.3 \
     --config.adaptive_beta=True \
-    --config.actor_drop=0.1 \
-    $COMMON_FLAGS
+    --config.actor_drop=0.1
 
 echo ""
 echo "============================================"
