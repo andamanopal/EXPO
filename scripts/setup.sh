@@ -108,21 +108,50 @@ echo "[4/6] Installing JAX 0.4.35 with system CUDA 12..."
 "$PIP" install "jax[cuda12_local]==0.4.35" \
     -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 
-# Remove any leftover pip nvidia packages from previous cuda12_pip installs.
-# These conflict with system CUDA. Do NOT remove jax-cuda12-plugin/pjrt.
-echo "       Cleaning up pip nvidia packages (using system CUDA instead)..."
-"$PIP" uninstall -y \
-    nvidia-cuda-nvcc-cu12 nvidia-cublas-cu12 nvidia-cuda-cupti-cu12 \
-    nvidia-cuda-runtime-cu12 nvidia-cudnn-cu12 nvidia-cufft-cu12 \
-    nvidia-cusolver-cu12 nvidia-cusparse-cu12 nvidia-nccl-cu12 \
-    nvidia-nvjitlink-cu12 2>/dev/null || true
+# Remove only nvidia-cuda-nvcc-cu12 (known __file__=None bug on cloud images).
+# KEEP runtime libs (cudnn, cublas, etc.) — many cloud images lack system cuDNN.
+echo "       Cleaning up nvidia-cuda-nvcc-cu12 (known broken on cloud images)..."
+"$PIP" uninstall -y nvidia-cuda-nvcc-cu12 2>/dev/null || true
+
+# Ensure cuDNN is available (needed for neural network ops, not just device detection)
+if ldconfig -p 2>/dev/null | grep -q libcudnn; then
+    echo "       System cuDNN found."
+else
+    echo "       System cuDNN NOT found. Ensuring pip nvidia-cudnn-cu12 is installed..."
+    "$PIP" install nvidia-cudnn-cu12 2>/dev/null || true
+    # Also ensure cublas/cusolver/other runtime libs are present
+    "$PIP" install nvidia-cublas-cu12 nvidia-cusolver-cu12 nvidia-cusparse-cu12 \
+        nvidia-cufft-cu12 nvidia-cuda-runtime-cu12 nvidia-nvjitlink-cu12 2>/dev/null || true
+fi
+
+# Add pip nvidia lib dirs to LD_LIBRARY_PATH (covers both system and pip cuDNN)
+NVIDIA_LIBS=$("$PYTHON" -c "
+import os, glob
+venv = '$VENV'
+libs = glob.glob(os.path.join(venv, 'lib/python*/site-packages/nvidia/*/lib'))
+print(':'.join(libs)) if libs else print('')
+" 2>/dev/null)
+if [ -n "$NVIDIA_LIBS" ]; then
+    export LD_LIBRARY_PATH="$NVIDIA_LIBS${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    echo "       Added pip nvidia libs to LD_LIBRARY_PATH"
+fi
 
 # Smoke test: can JAX see the GPU?
 echo "       JAX smoke test..."
 "$PYTHON" -c "import jax; devs=jax.devices(); print(f'       JAX {jax.__version__}, devices: {devs}')" 2>&1 || {
     echo "       ERROR: JAX cannot initialize. Check CUDA installation."
-    echo "       Expected: nvcc --version shows CUDA 12.x"
-    echo "       Expected: ls $CUDA_ROOT/lib64/libcudnn* finds cuDNN"
+    return 1 2>/dev/null || true
+}
+
+# Smoke test 2: can JAX actually compute on GPU? (catches missing cuDNN)
+echo "       JAX cuDNN smoke test..."
+"$PYTHON" -c "
+import jax, jax.numpy as jnp
+x = jnp.ones((2, 2))
+y = jnp.dot(x, x)
+print(f'       cuDNN test: {y.shape} on {y.devices()} — OK')
+" 2>&1 || {
+    echo "       ERROR: JAX GPU compute failed. cuDNN likely still missing."
     return 1 2>/dev/null || true
 }
 
