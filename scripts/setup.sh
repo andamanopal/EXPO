@@ -77,11 +77,13 @@ echo "[4/6] Installing JAX 0.4.x with CUDA 12..."
 # ---------------------------------------------------------------------------
 echo "[5/6] Installing EXPO dependencies..."
 
-# Core ML — pin tfp to 0.19.0 (matches environment.yml, has substrates.jax)
+# Core ML — IMPORTANT: re-state jax/jaxlib pins so flax/chex don't upgrade them
 "$PIP" install \
-    flax \
+    "jax==0.4.35" \
+    "jaxlib==0.4.35" \
+    "flax==0.7.5" \
     "optax==0.1.5" \
-    chex \
+    "chex==0.1.86" \
     "tensorflow-probability==0.19.0" \
     distrax \
     ml_collections \
