@@ -126,17 +126,19 @@ echo "       JAX smoke test..."
 echo "[5/6] Installing EXPO dependencies..."
 
 # Core ML stack — EVERY version pinned to prevent pip from upgrading JAX.
+# CRITICAL: flax>=0.8.0 needed (0.7.5 uses define_bool_state removed in JAX 0.4.25+)
+#           flax<=0.10.4 needed (0.10.5+ requires jax>=0.5.1)
 # CRITICAL: distrax==0.1.5 because 0.1.6+ requires jax>=0.7.0
 # CRITICAL: jax==0.4.35 re-stated so flax/chex can't upgrade it
 "$PIP" install \
     "jax==0.4.35" \
-    "flax==0.7.5" \
+    "flax==0.8.5" \
     "optax==0.1.5" \
     "chex==0.1.86" \
     "distrax==0.1.5" \
     "tensorflow-probability==0.19.0" \
     ml_collections \
-    orbax-checkpoint==0.2.3
+    orbax-checkpoint
 
 # RL environment
 "$PIP" install \
