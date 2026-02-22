@@ -98,7 +98,13 @@ def combine(one_dict, other_dict):
 def main(_):
     assert FLAGS.offline_ratio >= 0.0 and FLAGS.offline_ratio <= 1.0
 
-    wandb.init(project=FLAGS.project_name)
+    # Build meaningful run name: expo-<env_short>-<fix|adapt>-<beta>
+    env_short = FLAGS.env_name.split("-")[0]  # e.g. "antmaze", "pen"
+    beta_mode = "adapt" if FLAGS.config.adaptive_beta else "fix"
+    beta_val = f"{FLAGS.config.edit_action_scale:g}"
+    run_name = f"expo-{env_short}-{beta_mode}-{beta_val}"
+
+    wandb.init(project=FLAGS.project_name, name=run_name)
     wandb.config.update(FLAGS)
 
     exp_prefix = f"s{FLAGS.seed}_{FLAGS.pretrain_steps}pretrain"
