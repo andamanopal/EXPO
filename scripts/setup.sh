@@ -215,10 +215,19 @@ echo "       GL/osmesa.h: OK"
 "$PIP" install h5py click termcolor
 
 # Adroit hand envs with binary rewards (pen-binary-v0, door-binary-v0, etc.)
-# Standard mj_envs only has dense rewards. Binary variants are in the Cal-QL fork.
-# Dependency chain: pen-binary-v0 → mj_envs (nakamotoo fork) → mjrl
+# Standard mj_envs only has dense rewards. Binary variants are in the philipjball fork.
+# mj_envs has a git submodule (utils/quatmath) — pip git installs skip submodules,
+# so we must clone --recursive and pip install -e from the local checkout.
 "$PIP" install mjrl@git+https://github.com/aravindr93/mjrl.git
-"$PIP" install mj_envs@git+https://github.com/nakamotoo/mj_envs.git
+
+MJ_ENVS_DIR="/tmp/mj_envs"
+if [ ! -d "$MJ_ENVS_DIR/.git" ]; then
+    rm -rf "$MJ_ENVS_DIR"
+    git clone --recursive https://github.com/philipjball/mj_envs.git "$MJ_ENVS_DIR"
+else
+    (cd "$MJ_ENVS_DIR" && git submodule update --init --recursive)
+fi
+"$PIP" install -e "$MJ_ENVS_DIR"
 
 # AWAC expert datasets for Adroit binary-reward tasks (pen-binary-v0, etc.)
 AWAC_DIR="$HOME/.datasets/awac-data"
