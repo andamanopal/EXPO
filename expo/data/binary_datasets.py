@@ -12,7 +12,7 @@ import numpy as np
 
 from expo.data.dataset import Dataset
 
-AWAC_DATA_DIR = ""
+AWAC_DATA_DIR = os.environ.get("AWAC_DATA_DIR", "~/.datasets/awac-data/")
 
 
 def process_expert_dataset(expert_datset):

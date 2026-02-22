@@ -205,6 +205,7 @@ apt-get update -qq
 apt-get install -y libosmesa6-dev || echo "       WARN: libosmesa6-dev failed"
 apt-get install -y libglew-dev    || echo "       WARN: libglew-dev failed"
 apt-get install -y patchelf       || echo "       WARN: patchelf failed"
+apt-get install -y ffmpeg         || echo "       WARN: ffmpeg failed"
 apt-get install -y libgl1-mesa-dri 2>/dev/null || \
     apt-get install -y libgl1-mesa-glx 2>/dev/null || \
     echo "       WARN: mesa GL runtime not found (may already be installed)"
@@ -235,6 +236,12 @@ echo "       GL/osmesa.h: OK"
 
 # D4RL's actual runtime deps (that --no-deps skipped)
 "$PIP" install h5py click termcolor
+
+# Adroit hand envs with binary rewards (pen-binary-v0, door-binary-v0, etc.)
+# Standard mj_envs only has dense rewards. Binary variants are in the Cal-QL fork.
+# Dependency chain: pen-binary-v0 → mj_envs (nakamotoo fork) → mjrl
+"$PIP" install mjrl@git+https://github.com/aravindr93/mjrl.git
+"$PIP" install mj_envs@git+https://github.com/nakamotoo/mj_envs.git
 
 # Logging and utils
 "$PIP" install \
