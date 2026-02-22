@@ -23,7 +23,7 @@ def get_config():
     config.T = 10
 
     config.adaptive_beta = False
-    config.beta_lr = 3e-4
-    config.target_edit_mag = 0.5
+    config.beta_lr = 1e-4
+    config.beta_warmup_steps = 0
 
     return config

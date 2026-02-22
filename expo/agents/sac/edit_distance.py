@@ -1,10 +1,15 @@
-"""Learnable beta (edit action scale) via dual gradient descent.
+"""Learnable beta (edit action scale) via Q-advantage gradient ascent.
 
 Mirrors the Temperature module pattern used for SAC alpha tuning.
-When the edit policy's raw output magnitude exceeds the target,
-beta decreases to constrain edits. When underutilized, beta increases.
+Beta is optimized by maximizing Q(s, a_base + beta * delta): when
+increasing beta improves Q-values, beta grows; when edits overshoot,
+beta shrinks. Equilibrium is environment-specific by construction.
+
+Uses sigmoid reparameterization instead of exp+clip to guarantee
+nonzero gradients at all beta values within [min_beta, max_beta].
 """
 
+import jax
 import flax.linen as nn
 import jax.numpy as jnp
 
@@ -16,8 +21,11 @@ class EditDistance(nn.Module):
 
     @nn.compact
     def __call__(self) -> jnp.ndarray:
-        log_beta = self.param(
-            "log_beta",
-            init_fn=lambda key: jnp.full((), jnp.log(self.initial_beta)),
+        init_sigmoid = (self.initial_beta - self.min_beta) / (self.max_beta - self.min_beta)
+        init_logit = jnp.log(init_sigmoid / (1.0 - init_sigmoid))
+
+        logit = self.param(
+            "logit",
+            init_fn=lambda key: jnp.full((), init_logit),
         )
-        return jnp.clip(jnp.exp(log_beta), self.min_beta, self.max_beta)
+        return jax.nn.sigmoid(logit) * (self.max_beta - self.min_beta) + self.min_beta

@@ -34,7 +34,7 @@ export XLA_PYTHON_CLIENT_PREALLOCATE=false
 export D4RL_SUPPRESS_IMPORT_ERROR=1
 
 PROJECT="expo-adaptive-beta"
-SEED=42
+SEED=3
 
 # Quick mode: short runs to validate code works
 if [ "$1" = "--quick" ]; then

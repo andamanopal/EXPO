@@ -67,7 +67,8 @@ class EXPOLearner(Agent):
     n_edit_samples: int = struct.field(pytree_node=False)
     edit_action_scale: float = struct.field(pytree_node=False)
     adaptive_beta: bool = struct.field(pytree_node=False)
-    target_edit_mag: float = struct.field(pytree_node=False)
+    beta_warmup_steps: int = struct.field(pytree_node=False)
+    update_step: int
     batch_split: int = struct.field(pytree_node=False)
     M: int = struct.field(pytree_node=False)
     ddpm_temperature: float
@@ -124,8 +125,8 @@ class EXPOLearner(Agent):
         ddpm_temperature: float = 1.0,
         beta_schedule: str = 'vp',
         adaptive_beta: bool = False,
-        beta_lr: float = 3e-4,
-        target_edit_mag: float = 0.5,
+        beta_lr: float = 1e-4,
+        beta_warmup_steps: int = 0,
     ):
 
         action_dim = action_space.shape[-1]
@@ -287,7 +288,8 @@ class EXPOLearner(Agent):
             n_edit_samples=n_edit_samples,
             edit_action_scale=edit_action_scale,
             adaptive_beta=adaptive_beta,
-            target_edit_mag=target_edit_mag,
+            beta_warmup_steps=beta_warmup_steps,
+            update_step=jnp.int32(0),
             batch_split=batch_split,
             M=M,
             actor_tau=actor_tau,
@@ -465,9 +467,9 @@ class EXPOLearner(Agent):
             actions = dist.sample(seed=key)
 
             log_probs = dist.log_prob(actions)
-            raw_edit_mag = jnp.abs(actions).mean()
             beta = self.get_beta()
             actions = actions * beta
+            edit_mag = jnp.abs(actions).mean()  # post-beta: depends on beta
             log_probs -= actions.shape[-1] * jnp.log(beta)
 
             actions = actions + batch["actions"]
@@ -487,7 +489,7 @@ class EXPOLearner(Agent):
                 "edit_q": q.mean(),
                 "edit_actor_loss": edit_actor_loss,
                 "entropy": -log_probs.mean(),
-                "raw_edit_mag": raw_edit_mag,
+                "edit_mag": edit_mag,
                 "beta": beta,
             }
 
@@ -548,17 +550,55 @@ class EXPOLearner(Agent):
 
         return self.replace(temp=temp), temp_info
 
-    def update_beta(self, raw_edit_mag: float) -> Tuple[Agent, Dict[str, float]]:
+    def update_beta(self, batch: DatasetDict) -> Tuple[Agent, Dict[str, float]]:
+        key, rng = jax.random.split(self.rng)
+        dropout_key, rng = jax.random.split(rng)
+
+        # Forward pass: sample raw edits from current edit actor
+        edit_obs = jnp.concatenate([batch["observations"], batch["actions"]], axis=1)
+        dist = self.edit_actor.apply_fn({"params": self.edit_actor.params}, edit_obs)
+        raw_edits = dist.sample(seed=key)
+
+        # Q(s, a_base) baseline — same dropout key as q_edited for low-variance advantage
+        q_base_all = self.critic.apply_fn(
+            {"params": self.critic.params},
+            batch["observations"], batch["actions"], True, rngs={"dropout": dropout_key},
+        )
+        q_base = jax.lax.stop_gradient(q_base_all.min(axis=0).mean())
+
+        # Stop-gradient everything except beta_params
+        raw_edits_sg = jax.lax.stop_gradient(raw_edits)
+        obs_sg = jax.lax.stop_gradient(batch["observations"])
+        base_sg = jax.lax.stop_gradient(batch["actions"])
+        critic_params_sg = jax.lax.stop_gradient(self.critic.params)
+
         def beta_loss_fn(beta_params):
             beta = self.beta_state.apply_fn({"params": beta_params})
-            loss = beta * (raw_edit_mag - self.target_edit_mag)
-            return loss, {"beta": beta, "beta_loss": loss}
+            edited = raw_edits_sg * beta + base_sg
 
-        grads, beta_info = jax.grad(beta_loss_fn, has_aux=True)(
-            self.beta_state.params
+            qs = self.critic.apply_fn(
+                {"params": critic_params_sg}, obs_sg, edited,
+                True, rngs={"dropout": dropout_key},
+            )
+            q_edited = qs.min(axis=0).mean()
+
+            loss = -q_edited
+            advantage = q_edited - q_base
+            return loss, {
+                "beta": beta, "beta_loss": loss,
+                "q_advantage": advantage, "q_edited": q_edited, "q_base": q_base,
+            }
+
+        grads, beta_info = jax.grad(beta_loss_fn, has_aux=True)(self.beta_state.params)
+
+        # Zero grads during warmup
+        should_update = self.update_step >= self.beta_warmup_steps
+        grads = jax.tree_util.tree_map(
+            lambda g: jnp.where(should_update, g, jnp.zeros_like(g)), grads
         )
+
         new_beta_state = self.beta_state.apply_gradients(grads=grads)
-        return self.replace(beta_state=new_beta_state), beta_info
+        return self.replace(beta_state=new_beta_state, rng=rng), beta_info
 
     def update_critic(self, batch: DatasetDict) -> Tuple[TrainState, Dict[str, float]]:
 
@@ -634,9 +674,10 @@ class EXPOLearner(Agent):
                 edit_info = {**edit_info, **temp_info}
 
                 if self.adaptive_beta:
-                    new_agent, beta_info = new_agent.update_beta(edit_info["raw_edit_mag"])
+                    new_agent, beta_info = new_agent.update_beta(mini_batch)
                     edit_info = {**edit_info, **beta_info}
 
+        new_agent = new_agent.replace(update_step=new_agent.update_step + 1)
         return new_agent, {**diffusion_info, **edit_info, **critic_info}
     
 
@@ -664,7 +705,8 @@ class EXPOLearner(Agent):
             edit_info = {**edit_info, **temp_info}
 
             if self.adaptive_beta:
-                new_agent, beta_info = new_agent.update_beta(edit_info["raw_edit_mag"])
+                new_agent, beta_info = new_agent.update_beta(mini_batch)
                 edit_info = {**edit_info, **beta_info}
 
+        new_agent = new_agent.replace(update_step=new_agent.update_step + 1)
         return new_agent, {**diffusion_info, **edit_info, **critic_info}
