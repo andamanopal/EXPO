@@ -541,7 +541,7 @@ class EXPOLearner(Agent):
         def temperature_loss_fn(temp_params):
             temperature = self.temp.apply_fn({"params": temp_params})
             temp_loss = temperature * (entropy - self.target_entropy).mean()
-            return temp_loss, {}
+            return temp_loss, {"temperature": temperature, "temp_loss": temp_loss}
 
         grads, temp_info = jax.grad(temperature_loss_fn, has_aux=True)(self.temp.params)
         temp = self.temp.apply_gradients(grads=grads)
@@ -623,20 +623,21 @@ class EXPOLearner(Agent):
             if pretrain_q:
                 new_agent, critic_info = new_agent.update_critic(mini_batch)
 
-        new_agent, actor_info = new_agent.update_actor(mini_batch)
+        new_agent, diffusion_info = new_agent.update_actor(mini_batch)
 
+        edit_info = {}
         if pretrain_edit:
 
             if self.n_edit_samples > 0:
-                new_agent, actor_info = new_agent.update_edit_actor(mini_batch)
-                new_agent, temp_info = new_agent.update_temperature(actor_info["entropy"])
-                actor_info.update(temp_info)
+                new_agent, edit_info = new_agent.update_edit_actor(mini_batch)
+                new_agent, temp_info = new_agent.update_temperature(edit_info["entropy"])
+                edit_info = {**edit_info, **temp_info}
 
                 if self.adaptive_beta:
-                    new_agent, beta_info = new_agent.update_beta(actor_info["raw_edit_mag"])
-                    actor_info.update(beta_info)
+                    new_agent, beta_info = new_agent.update_beta(edit_info["raw_edit_mag"])
+                    edit_info = {**edit_info, **beta_info}
 
-        return new_agent, {**actor_info, **critic_info}
+        return new_agent, {**diffusion_info, **edit_info, **critic_info}
     
 
 
@@ -654,15 +655,16 @@ class EXPOLearner(Agent):
             mini_batch = jax.tree_util.tree_map(slice, batch)
             new_agent, critic_info = new_agent.update_critic(mini_batch)
 
-        new_agent, actor_info = new_agent.update_actor(mini_batch)
+        new_agent, diffusion_info = new_agent.update_actor(mini_batch)
 
+        edit_info = {}
         if self.n_edit_samples > 0:
-            new_agent, actor_info = new_agent.update_edit_actor(mini_batch)
-            new_agent, temp_info = new_agent.update_temperature(actor_info["entropy"])
-            actor_info.update(temp_info)
+            new_agent, edit_info = new_agent.update_edit_actor(mini_batch)
+            new_agent, temp_info = new_agent.update_temperature(edit_info["entropy"])
+            edit_info = {**edit_info, **temp_info}
 
             if self.adaptive_beta:
-                new_agent, beta_info = new_agent.update_beta(actor_info["raw_edit_mag"])
-                actor_info.update(beta_info)
+                new_agent, beta_info = new_agent.update_beta(edit_info["raw_edit_mag"])
+                edit_info = {**edit_info, **beta_info}
 
-        return new_agent, {**actor_info, **critic_info}
+        return new_agent, {**diffusion_info, **edit_info, **critic_info}

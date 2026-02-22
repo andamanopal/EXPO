@@ -140,6 +140,9 @@ def main(_):
     )
     replay_buffer.seed(FLAGS.seed)
 
+    # Track best evaluation return for best-model checkpointing
+    best_eval_return = -np.inf
+
     for i in tqdm.tqdm(
         range(0, FLAGS.pretrain_steps), smoothing=0.1, disable=not FLAGS.tqdm
     ):
@@ -153,19 +156,18 @@ def main(_):
         agent, update_info = agent.update_offline(batch, FLAGS.utd_ratio, FLAGS.pretrain_q, FLAGS.pretrain_edit)
 
         if i % FLAGS.log_interval == 0:
-            for k, v in update_info.items():
-                wandb.log({f"offline-training/{k}": v}, step=i)
+            metrics = {f"offline-training/{k}": v for k, v in update_info.items()}
+            wandb.log(metrics, step=i)
 
         if i % FLAGS.offline_eval_interval == 0:
             if not FLAGS.expo:
                 eval_info = evaluate(agent, eval_env, num_episodes=FLAGS.eval_episodes)
-            
+
             else:
                 eval_info, agent = evaluate_diffusion(agent, eval_env, num_episodes=FLAGS.eval_episodes)
 
-
-            for k, v in eval_info.items():
-                wandb.log({f"offline-evaluation/{k}": v}, step=i)
+            metrics = {f"offline-evaluation/{k}": v for k, v in eval_info.items()}
+            wandb.log(metrics, step=i)
 
     observation, done = env.reset(), False
 
@@ -200,9 +202,9 @@ def main(_):
         if done:
             observation, done = env.reset(), False
 
-            for k, v in info["episode"].items():
-                decode = {"r": "return", "l": "length", "t": "time"}
-                wandb.log({f"training/{decode[k]}": v}, step=i + FLAGS.pretrain_steps)
+            decode = {"r": "return", "l": "length", "t": "time"}
+            metrics = {f"training/{decode[k]}": v for k, v in info["episode"].items()}
+            wandb.log(metrics, step=i + FLAGS.pretrain_steps)
 
         if i >= FLAGS.start_training:
             online_batch = replay_buffer.sample(
@@ -222,8 +224,8 @@ def main(_):
             agent, update_info = agent.update(batch, FLAGS.utd_ratio)
 
             if i % FLAGS.log_interval == 0:
-                for k, v in update_info.items():
-                    wandb.log({f"training/{k}": v}, step=i + FLAGS.pretrain_steps)
+                metrics = {f"training/{k}": v for k, v in update_info.items()}
+                wandb.log(metrics, step=i + FLAGS.pretrain_steps)
 
         if i % FLAGS.eval_interval == 0:
             if not FLAGS.expo:
@@ -243,9 +245,27 @@ def main(_):
                     save_video=FLAGS.save_video,
                 )
 
+            # Log evaluation metrics + current beta value
+            metrics = {f"evaluation/{k}": v for k, v in eval_info.items()}
+            if hasattr(agent, "get_beta"):
+                metrics["evaluation/beta"] = float(agent.get_beta())
+            wandb.log(metrics, step=i + FLAGS.pretrain_steps)
 
-            for k, v in eval_info.items():
-                wandb.log({f"evaluation/{k}": v}, step=i + FLAGS.pretrain_steps)
+            # Track best model
+            eval_return = eval_info.get("return", -np.inf)
+            if eval_return > best_eval_return:
+                best_eval_return = eval_return
+                wandb.run.summary["best_eval_return"] = best_eval_return
+                wandb.run.summary["best_eval_step"] = i + FLAGS.pretrain_steps
+                if FLAGS.checkpoint_model:
+                    try:
+                        best_dir = os.path.join(log_dir, "best_checkpoint")
+                        os.makedirs(best_dir, exist_ok=True)
+                        checkpoints.save_checkpoint(
+                            best_dir, agent, step=i, keep=1, overwrite=True
+                        )
+                    except:
+                        print("Could not save best model checkpoint.")
 
             if FLAGS.checkpoint_model:
                 try:
@@ -261,6 +281,8 @@ def main(_):
                         pickle.dump(replay_buffer, f, pickle.HIGHEST_PROTOCOL)
                 except:
                     print("Could not save agent buffer.")
+
+    wandb.finish()
 
 
 if __name__ == "__main__":
