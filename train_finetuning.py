@@ -124,10 +124,7 @@ def main(_):
     # mj_envs registers binary-reward Adroit envs (pen-binary-v0, etc.) on import.
     # Must happen before gym.make().
     if "binary" in FLAGS.env_name:
-        try:
-            import mj_envs
-        except ImportError:
-            pass
+        import mj_envs
 
     env = gym.make(FLAGS.env_name)
     env = wrap_gym(env, rescale_actions=True)

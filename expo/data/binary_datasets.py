@@ -6,8 +6,8 @@ import cloudpickle as pickle
 
 try:
     import mj_envs
-except:
-    pass
+except Exception as e:
+    print(f"WARNING: mj_envs import failed: {e}")
 import numpy as np
 
 from expo.data.dataset import Dataset
