@@ -61,7 +61,7 @@ echo "[2/6] Ensuring Python 3.10..."
 
 if ! command -v python3.10 &> /dev/null; then
     echo "       Installing python3.10 via apt..."
-    apt-get update -qq && apt-get install -y -qq python3.10 python3.10-venv python3.10-dev 2>/dev/null
+    apt-get update -qq && apt-get install -y -qq python3.10 python3.10-venv python3.10-dev python3.10-distutils 2>/dev/null
 fi
 
 if ! command -v python3.10 &> /dev/null; then
@@ -90,6 +90,13 @@ fi
 
 if [ ! -d "$VENV" ]; then
     python3.10 -m venv "$VENV"
+fi
+
+# Ensure pip exists — some RunPod images create venvs without ensurepip
+if [ ! -f "$PIP" ]; then
+    echo "       pip missing in venv, bootstrapping..."
+    "$PYTHON" -m ensurepip --upgrade 2>/dev/null || \
+        curl -sS https://bootstrap.pypa.io/get-pip.py | "$PYTHON"
 fi
 
 echo "       Python: $PYTHON"
