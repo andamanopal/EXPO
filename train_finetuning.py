@@ -121,6 +121,14 @@ def main(_):
         buffer_dir = os.path.join(log_dir, "buffers")
         os.makedirs(buffer_dir, exist_ok=True)
 
+    # mj_envs registers binary-reward Adroit envs (pen-binary-v0, etc.) on import.
+    # Must happen before gym.make().
+    if "binary" in FLAGS.env_name:
+        try:
+            import mj_envs
+        except ImportError:
+            pass
+
     env = gym.make(FLAGS.env_name)
     env = wrap_gym(env, rescale_actions=True)
     env = gym.wrappers.RecordEpisodeStatistics(env, deque_size=1)
