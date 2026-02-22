@@ -12,15 +12,15 @@
 # Requires: CUDA 12.x + cuDNN 9.x pre-installed on the machine.
 #
 # Usage:
-#   git clone -b adaptive-beta https://github.com/andamanopal/EXPO.git /data/EXPO
-#   cd /data/EXPO && . scripts/setup.sh
+#   git clone -b adaptive-beta https://github.com/andamanopal/EXPO.git /workspace/EXPO
+#   cd /workspace/EXPO && . scripts/setup.sh
 ###############################################################################
 
 echo "============================================"
 echo "  EXPO Adaptive Beta — Environment Setup"
 echo "============================================"
 
-WORKDIR="${EXPO_WORKDIR:-/data/EXPO}"
+WORKDIR="${EXPO_WORKDIR:-/workspace/EXPO}"
 VENV="$WORKDIR/.venv"
 PIP="$VENV/bin/pip"
 PYTHON="$VENV/bin/python"
@@ -242,6 +242,19 @@ echo "       GL/osmesa.h: OK"
 # Dependency chain: pen-binary-v0 → mj_envs (nakamotoo fork) → mjrl
 "$PIP" install mjrl@git+https://github.com/aravindr93/mjrl.git
 "$PIP" install mj_envs@git+https://github.com/nakamotoo/mj_envs.git
+
+# AWAC expert datasets for Adroit binary-reward tasks (pen-binary-v0, etc.)
+AWAC_DIR="$HOME/.datasets/awac-data"
+if [ ! -f "$AWAC_DIR/pen2_sparse.npy" ]; then
+    echo "       Downloading AWAC expert datasets..."
+    "$PIP" install gdown 2>/dev/null
+    "$VENV/bin/gdown" 1yUdJnGgYit94X_AvV6JJP5Y3Lx2JF30Y -O /tmp/awac-data.zip
+    mkdir -p "$AWAC_DIR"
+    unzip -o /tmp/awac-data.zip -d "$AWAC_DIR/"
+    rm -f /tmp/awac-data.zip
+else
+    echo "       AWAC data already at $AWAC_DIR"
+fi
 
 # Logging and utils
 "$PIP" install \
