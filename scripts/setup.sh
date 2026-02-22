@@ -8,8 +8,8 @@
 #   python=3.10, numpy>=1.24<2.0, jax==0.4.35, jaxlib==0.4.34, flax==0.8.5,
 #   optax==0.1.5, chex==0.1.86, distrax==0.1.5, tfp==0.19.0, gym==0.23.1
 #
-# Uses system CUDA (cuda12_local) — NOT pip nvidia-* packages.
-# Requires: CUDA 12.x + cuDNN 9.x pre-installed on the machine.
+# Uses pip CUDA packages (cuda12_pip) — self-contained, no system cuDNN required.
+# Requires: NVIDIA driver pre-installed (nvidia-smi must work). CUDA toolkit optional.
 #
 # Usage:
 #   git clone -b adaptive-beta https://github.com/andamanopal/EXPO.git /workspace/EXPO
@@ -28,11 +28,9 @@ PYTHON="$VENV/bin/python"
 # ---------------------------------------------------------------------------
 # Step 0: System CUDA environment (persists because script is sourced)
 # ---------------------------------------------------------------------------
-# cuda12_local expects system CUDA. Set paths so JAX + XLA can find it.
+# nvcc path kept for diagnostics; JAX uses pip nvidia packages (cuda12_pip).
 export CUDA_ROOT="${CUDA_ROOT:-/usr/local/cuda}"
 export PATH="$CUDA_ROOT/bin${PATH:+:$PATH}"
-export LD_LIBRARY_PATH="$CUDA_ROOT/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-export XLA_FLAGS="--xla_gpu_cuda_data_dir=$CUDA_ROOT"
 
 # MuJoCo 210 path (needed by mujoco_py, used by D4RL)
 export LD_LIBRARY_PATH="$HOME/.mujoco/mujoco210/bin${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
@@ -105,48 +103,20 @@ echo "       $($PYTHON --version)"
 "$PIP" install --upgrade pip setuptools wheel 2>&1 | tail -1
 
 # ---------------------------------------------------------------------------
-# Step 4: Install JAX 0.4.35 with system CUDA (cuda12_local)
+# Step 4: Install JAX 0.4.35 with pip CUDA packages (cuda12_pip)
 # ---------------------------------------------------------------------------
-echo "[4/6] Installing JAX 0.4.35 with system CUDA 12..."
+echo "[4/6] Installing JAX 0.4.35 with pip CUDA packages..."
 
-# cuda12_local = system CUDA. cuda12_pip = pip nvidia-* packages.
-# pip nvidia packages have __file__=None bug on RunPod/cloud (Python 3.10).
+# cuda12_pip = self-contained pip nvidia packages (cudnn, cublas, etc.)
+# JAX finds them via rpath — no LD_LIBRARY_PATH needed.
 # Note: JAX 0.4.35 has packaging bug #24826 — it pulls jaxlib==0.4.34 (fine).
-"$PIP" install "jax[cuda12_local]==0.4.35" \
+"$PIP" install "jax[cuda12_pip]==0.4.35" \
     -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
-
-# Ensure ALL pip nvidia CUDA packages are installed (cuDNN, ptxas, cublas, etc.)
-# Original EXPO uses conda which bundles these automatically. With pip, we need them
-# as separate packages since this cloud image lacks a full system CUDA toolkit.
-echo "       Ensuring pip nvidia CUDA packages are installed..."
-"$PIP" install \
-    nvidia-cuda-nvcc-cu12 \
-    nvidia-cudnn-cu12 \
-    nvidia-cublas-cu12 \
-    nvidia-cusolver-cu12 \
-    nvidia-cusparse-cu12 \
-    nvidia-cufft-cu12 \
-    nvidia-cuda-runtime-cu12 \
-    nvidia-cuda-cupti-cu12 \
-    nvidia-nvjitlink-cu12 \
-    nvidia-nccl-cu12 2>/dev/null || true
-
-# Add pip nvidia lib dirs to LD_LIBRARY_PATH (covers both system and pip cuDNN)
-NVIDIA_LIBS=$("$PYTHON" -c "
-import os, glob
-venv = '$VENV'
-libs = glob.glob(os.path.join(venv, 'lib/python*/site-packages/nvidia/*/lib'))
-print(':'.join(libs)) if libs else print('')
-" 2>/dev/null)
-if [ -n "$NVIDIA_LIBS" ]; then
-    export LD_LIBRARY_PATH="$NVIDIA_LIBS${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-    echo "       Added pip nvidia libs to LD_LIBRARY_PATH"
-fi
 
 # Smoke test: can JAX see the GPU?
 echo "       JAX smoke test..."
 "$PYTHON" -c "import jax; devs=jax.devices(); print(f'       JAX {jax.__version__}, devices: {devs}')" 2>&1 || {
-    echo "       ERROR: JAX cannot initialize. Check CUDA installation."
+    echo "       ERROR: JAX cannot initialize. Check NVIDIA driver (nvidia-smi)."
     return 1 2>/dev/null || true
 }
 

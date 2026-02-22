@@ -24,23 +24,11 @@ if [ ! -f "$PYTHON" ]; then
     exit 1
 fi
 
-# System CUDA paths (same as setup.sh — needed if run in a fresh shell)
+# CUDA paths — JAX uses pip nvidia packages (cuda12_pip), no system CUDA libs needed.
+# CUDA_ROOT + PATH kept for nvcc diagnostics only.
 export CUDA_ROOT="${CUDA_ROOT:-/usr/local/cuda}"
 export PATH="$CUDA_ROOT/bin${PATH:+:$PATH}"
-export LD_LIBRARY_PATH="$CUDA_ROOT/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-export XLA_FLAGS="${XLA_FLAGS:---xla_gpu_cuda_data_dir=$CUDA_ROOT}"
 export LD_LIBRARY_PATH="$HOME/.mujoco/mujoco210/bin${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-
-# Add pip nvidia libs (cuDNN, cublas, etc.) — needed on images without system cuDNN
-NVIDIA_LIBS=$("$PYTHON" -c "
-import os, glob
-venv = '$WORKDIR/.venv'
-libs = glob.glob(os.path.join(venv, 'lib/python*/site-packages/nvidia/*/lib'))
-print(':'.join(libs)) if libs else print('')
-" 2>/dev/null)
-if [ -n "$NVIDIA_LIBS" ]; then
-    export LD_LIBRARY_PATH="$NVIDIA_LIBS${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-fi
 
 export XLA_PYTHON_CLIENT_PREALLOCATE=false
 export D4RL_SUPPRESS_IMPORT_ERROR=1
